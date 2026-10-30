@@ -48,8 +48,52 @@ it on a command line where shell history/process inspection could expose it.
 
 ## Register with Codex
 
-Build first, then add the following to `~/.codex/config.toml`. Replace the executable
-path with an absolute path on your machine:
+The easiest setup, including for a desktop app started from the Dock, is to set
+the MCP server's environment directly in your **personal** `~/.codex/config.toml`.
+These values are passed to the server process when Codex launches it; they do not
+need to be exported in a terminal.
+
+1. Run `make build` in this repository.
+2. Open `~/.codex/config.toml` in your text editor (create it if necessary).
+3. Add the following block. If `[mcp_servers.cosense]` already exists, edit that
+   block instead of adding a duplicate. Replace the executable path, project
+   name, and cookie placeholder with your actual values.
+
+```toml
+[mcp_servers.cosense]
+command = "/absolute/path/to/cosense-simple-mcp/bin/cosense-simple-mcp"
+tool_timeout_sec = 60
+default_tools_approval_mode = "writes"
+
+[mcp_servers.cosense.env]
+COSENSE_PROJECT_NAME = "your-project-name"
+COSENSE_SID = "paste-the-connect.sid-cookie-value-here"
+```
+
+4. Save the file, then restart your Codex/ChatGPT desktop app or CLI so the MCP
+   process is launched with the new settings.
+5. Ask it to list a few pages from Cosense to check the connection.
+
+For example, a project at `https://scrapbox.io/my-knowledge/` uses
+`COSENSE_PROJECT_NAME = "my-knowledge"`. To obtain the cookie in Chrome, log in to
+Cosense, open Developer Tools → Application → Storage → Cookies →
+`https://scrapbox.io`, and copy the **Value** of `connect.sid`. Paste only that
+value inside the TOML quotes. Browser labels can vary.
+
+The `env` table stores the cookie as plaintext on your computer. Keep this personal
+configuration out of Git and shared documents; on macOS/Linux you can restrict
+access with `chmod 600 ~/.codex/config.toml`. Do not put the real cookie in a chat
+message. For public read-only access, omit the `COSENSE_SID` line.
+
+### Alternative: forward existing shell variables with `env_vars`
+
+`env` assigns actual values. In contrast,
+`env_vars = ["COSENSE_PROJECT_NAME", "COSENSE_SID"]` only names variables to
+**forward from the already-running Codex process**; it does not assign any values.
+Use this alternative if you prefer not to store the cookie in TOML.
+
+For a macOS zsh terminal, configure the server with `env_vars` instead of the
+`[mcp_servers.cosense.env]` table:
 
 ```toml
 [mcp_servers.cosense]
@@ -59,10 +103,35 @@ tool_timeout_sec = 60
 default_tools_approval_mode = "writes"
 ```
 
-Make the variables available in the environment **of Codex itself** before starting
-it. A desktop application may not inherit variables exported in a separate shell.
-Alternatively, put the non-secret project name in `[mcp_servers.cosense.env]` and
-forward only `COSENSE_SID`. Keep secrets out of project-scoped configuration.
+Then run these commands in the **same terminal** before launching the CLI:
+
+```zsh
+export COSENSE_PROJECT_NAME='your-project-name'
+read -rs 'COSENSE_SID?Paste connect.sid (hidden): '
+print
+export COSENSE_SID
+codex
+```
+
+Paste the cookie at the hidden prompt and press Enter. The cookie is not part of
+the command text saved in shell history. These exports last for that shell and
+its child processes. Running them in a terminal does not update a desktop app
+that is already open or one started separately from the Dock; use the direct
+`env` setup above for that case. Creating a repository `.env` file alone has no
+effect because this server does not load it.
+
+### ChatGPT desktop versus web
+
+For the same local Codex host, the official documentation describes shared MCP
+configuration across the ChatGPT desktop app, Codex CLI, and IDE extension. The
+desktop app also offers Settings → MCP servers → Add server → STDIO; use the
+compiled executable as its command. Use the personal TOML `env` table above to
+make the two variables explicit, then restart the connection/app.
+
+ChatGPT **web** does not read your computer's `~/.codex/config.toml`. Its hosted
+plugin connection requires a separately supported remote setup. This project's
+current stdio executable cannot be registered directly by entering a server URL
+in ChatGPT web. The steps above target a local desktop/CLI connection.
 
 Run `codex mcp list` and use `/mcp` in the CLI to check the connection. The executable
 starts without banners, writes only MCP messages to stdout, emits content-free
