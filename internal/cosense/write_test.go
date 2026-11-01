@@ -1,9 +1,11 @@
 package cosense
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
+	"log"
 	"net/http"
 	"strings"
 	"sync"
@@ -12,6 +14,36 @@ import (
 
 	"github.com/coder/websocket"
 )
+
+func TestWriteDiagnosticsExcludeSensitiveData(t *testing.T) {
+	var output bytes.Buffer
+	previous := log.Writer()
+	log.SetOutput(&output)
+	t.Cleanup(func() { log.SetOutput(previous) })
+	m := &mockCosense{page: fixturePage(true), ackError: "ValidationError"}
+	c := testClient(t, m.handler(t))
+	_, err := c.AppendPage(context.Background(), "Test", "private body", oldCommit)
+	if !errors.Is(err, ErrUncertain) {
+		t.Fatalf("expected uncertain result, got %v", err)
+	}
+	got := output.String()
+	if !strings.Contains(got, "stage=commit_ack detail=server_error_ValidationError") {
+		t.Fatalf("missing diagnostic: %q", got)
+	}
+	for _, secret := range []string{"secret-cookie", "sensitive body", "private body"} {
+		if strings.Contains(got, secret) {
+			t.Fatalf("diagnostic leaked sensitive data: %q", got)
+		}
+	}
+}
+
+func TestPacketType(t *testing.T) {
+	for input, want := range map[string]string{"": "unknown", "sensitive": "unknown", "431[private]": "43", "2": "2", "4xprivate": "4"} {
+		if got := packetType(input); got != want {
+			t.Errorf("packetType(%q) = %q, want %q", input, got, want)
+		}
+	}
+}
 
 const oldCommit = "111111111111111111111111"
 const newCommit = "222222222222222222222222"
@@ -85,7 +117,7 @@ func (m *mockCosense) socket(t *testing.T, w http.ResponseWriter, r *http.Reques
 	defer cancel()
 	ws.Write(ctx, websocket.MessageText, []byte(`0{"sid":"mock","pingInterval":25000,"pingTimeout":20000}`))
 	_, b, err := ws.Read(ctx)
-	if err != nil || string(b) != "40" {
+	if err != nil || string(b) != `40{"protocolVersion":2}` {
 		t.Errorf("connect %q %v", b, err)
 		return
 	}
@@ -115,29 +147,26 @@ func (m *mockCosense) socket(t *testing.T, w http.ResponseWriter, r *http.Reques
 	}
 	var name string
 	json.Unmarshal(event[0], &name)
-	var req struct {
-		Method string `json:"method"`
-		Data   commit `json:"data"`
-	}
+	var req commit
 	if err := json.Unmarshal(event[1], &req); err != nil {
 		t.Error(err)
 		return
 	}
-	if name != "socket.io-request" || req.Method != "commit" || !req.Data.Freeze || req.Data.Kind != "page" {
+	if name != "commit" || !req.Freeze || req.Kind != "page" {
 		t.Error("bad commit envelope")
 	}
 	m.mu.Lock()
-	m.commits = append(m.commits, req.Data)
+	m.commits = append(m.commits, req)
 	if m.ackError != "" {
 		payload, _ := json.Marshal([]any{map[string]any{"error": map[string]string{"name": m.ackError, "message": "sensitive body secret-cookie"}}})
 		m.mu.Unlock()
 		ws.Write(ctx, websocket.MessageText, append([]byte("431"), payload...))
 		return
 	}
-	if *m.page.Persistent && (req.Data.ParentID == nil || *req.Data.ParentID != m.page.CommitID) {
+	if *m.page.Persistent && (req.ParentID == nil || *req.ParentID != m.page.CommitID) {
 		t.Error("missing revision guard")
 	}
-	for _, change := range req.Data.Changes {
+	for _, change := range req.Changes {
 		for _, key := range []string{"links", "projectLinks", "descriptions"} {
 			if value, ok := change[key]; ok && value == nil {
 				t.Errorf("null %s metadata", key)

@@ -137,6 +137,11 @@ Run `codex mcp list` and use `/mcp` in the CLI to check the connection. The exec
 starts without banners, writes only MCP messages to stdout, emits content-free
 diagnostics to stderr, and exits on stdin closure, SIGINT, or SIGTERM.
 
+Write failures emit a content-free diagnostic to stderr identifying the commit
+or read-back stage and, when available, the packet type or sanitized server error
+name. Packet bodies, page titles and content, session cookies, and raw errors are
+not logged. An uncertain write must still be inspected before retrying.
+
 Configuration and approval settings follow the
 [official Codex MCP documentation](https://learn.chatgpt.com/docs/extend/mcp).
 Tool annotations/descriptions help clients ask for approval; **they are not a
@@ -256,8 +261,9 @@ GET /api/pages/:project/search/query?q=…
 ```
 
 Writes authenticate with `/api/users/me` and `/api/projects/:project`, then use
-Engine.IO v4 at `/socket.io/?EIO=4&transport=websocket`. A `socket.io-request`
-`commit` carries the page/project/user IDs, `parentId`, additive line changes,
+Engine.IO v4 at `/socket.io/?EIO=4&transport=websocket`, with Socket.IO
+`protocolVersion: 2` authentication. A direct `commit` event carries the
+page/project/user IDs, `parentId`, additive line changes,
 and `freeze: true`. The server must reject stale parents with `NotFastForwardError`
 and duplicate titles with `DuplicateTitleError`. These undocumented guarantees
 still require live verification in an authorized test project.

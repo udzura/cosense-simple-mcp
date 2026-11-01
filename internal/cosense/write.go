@@ -176,13 +176,16 @@ func (c *Client) write(ctx context.Context, title, content, expected string, cre
 	// line IDs/text intact plus our appended lines. Never attempt rollback.
 	check, err := c.GetPage(ctx, p.Title)
 	if err != nil || check.ID != p.ID || len(check.Lines) < len(p.Lines)+len(added) {
+		writeDiagnostic("readback", "page_or_line_count_mismatch")
 		return out, ErrUncertain
 	}
 	if !reflect.DeepEqual(check.Lines[:len(p.Lines)], p.Lines) {
+		writeDiagnostic("readback", "original_lines_mismatch")
 		return out, ErrUncertain
 	}
 	for i, text := range added {
 		if check.Lines[len(p.Lines)+i].Text != text {
+			writeDiagnostic("readback", "added_lines_mismatch")
 			return out, ErrUncertain
 		}
 	}
